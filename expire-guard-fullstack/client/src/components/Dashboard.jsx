@@ -11,7 +11,7 @@ const getStatus = (dateStr) => {
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
 
   if (diffDays < 0) return { color: "bg-red-500", text: "text-red-500", label: "Expired", days: `${Math.abs(diffDays)}d ago` };
-  if (diffDays <= 7) return { color: "bg-orange-500", text: "text-orange-500", label: "Expiring", days: `${diffDays}d left` };
+  if (diffDays <= 7) return { color: "bg-red-500", text: "text-red-500", label: "Expiring", days: `${diffDays}d left` };
   return { color: "bg-emerald-500", text: "text-emerald-500", label: "Good", days: `${diffDays}d left` };
 };
 
