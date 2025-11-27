@@ -28,7 +28,7 @@ const AddItemModal = ({ newItem, setNewItem, onSave, onClose, onScan }) => {
                   onChange={e => setNewItem({...newItem, category: e.target.value})} 
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-white mt-1"
                 >
-                   {['Groceries', 'Food', 'Medicine', 'Cosmetics'].map(c => <option key={c} value={c}>{c}</option>)}
+                   {['Groceries', 'Food', 'Medicine', 'Cosmetics', 'Others'].map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
              </div>
              <div>

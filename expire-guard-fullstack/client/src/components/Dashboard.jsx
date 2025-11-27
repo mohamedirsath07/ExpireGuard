@@ -17,7 +17,7 @@ const getStatus = (dateStr) => {
 
 const Dashboard = ({ products, onDelete }) => {
   const [activeCat, setActiveCat] = React.useState('All');
-  const categories = ['All', 'Groceries', 'Food', 'Medicine', 'Cosmetics'];
+  const categories = ['All', 'Groceries', 'Food', 'Medicine', 'Cosmetics', 'Others'];
   const listRef = useRef(null);
 
   const filtered = useMemo(() => {
