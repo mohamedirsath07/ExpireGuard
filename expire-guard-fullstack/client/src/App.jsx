@@ -35,11 +35,16 @@ export default function App() {
       const expiringNotifications = checkExpiringProducts(products);
       setNotifications(expiringNotifications);
       
-      // Send browser notifications for high urgency items
-      const highUrgency = expiringNotifications.filter(n => n.urgency === 'high');
-      if (highUrgency.length > 0) {
-        notifyExpiringProducts(products);
+      // Send browser notifications for high urgency items (only on HTTPS or localhost)
+      if (window.isSecureContext) {
+        const highUrgency = expiringNotifications.filter(n => n.urgency === 'high');
+        if (highUrgency.length > 0) {
+          notifyExpiringProducts(products);
+        }
       }
+    } else {
+      // Reset notifications when no products
+      setNotifications([]);
     }
   }, [products]);
 
