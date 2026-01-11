@@ -4,3 +4,5 @@ python-multipart
 Pillow
 pytesseract
 numpy
+opencv-python-headless
+python-dateutil
