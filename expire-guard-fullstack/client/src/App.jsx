@@ -1,6 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { db } from './firebase';
-import { collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy } from 'firebase/firestore';
 import Dashboard from './components/Dashboard';
 import Scanner from './components/Scanner';
 import AddItemModal from './components/AddItemModal';
@@ -9,6 +7,28 @@ import InstallPrompt from './components/InstallPrompt';
 import { Scan, Plus, Bell } from 'lucide-react';
 import { requestNotificationPermission, checkExpiringProducts, notifyExpiringProducts } from './notifications';
 
+// Local Storage key
+const STORAGE_KEY = 'expireguard_products';
+
+// Helper functions for localStorage
+const loadProducts = () => {
+  try {
+    const data = localStorage.getItem(STORAGE_KEY);
+    return data ? JSON.parse(data) : [];
+  } catch (err) {
+    console.error('Failed to load products:', err);
+    return [];
+  }
+};
+
+const saveProducts = (products) => {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(products));
+  } catch (err) {
+    console.error('Failed to save products:', err);
+  }
+};
+
 export default function App() {
   const [products, setProducts] = useState([]);
   const [view, setView] = useState('dashboard');
@@ -16,30 +36,23 @@ export default function App() {
   const [scanConfidence, setScanConfidence] = useState(null);
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
 
-  // Load from Firebase
+  // Load from localStorage on mount
   useEffect(() => {
-    try {
-      const q = query(collection(db, "products"), orderBy("expiryDate"));
-      const unsub = onSnapshot(q, (snapshot) => {
-        setProducts(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })));
-        setLoading(false);
-      }, (err) => {
-        console.error("Firebase error:", err);
-        setError("Failed to connect to database");
-        setLoading(false);
-      });
-      return () => unsub();
-    } catch (err) {
-      console.error("Firebase init error:", err);
-      setError("Failed to initialize database");
-      setLoading(false);
-    }
+    const savedProducts = loadProducts();
+    // Sort by expiry date
+    savedProducts.sort((a, b) => new Date(a.expiryDate) - new Date(b.expiryDate));
+    setProducts(savedProducts);
   }, []);
 
-  // Initialize notifications on mount (request permission + register service worker)
+  // Save to localStorage whenever products change
+  useEffect(() => {
+    if (products.length > 0 || localStorage.getItem(STORAGE_KEY)) {
+      saveProducts(products);
+    }
+  }, [products]);
+
+  // Initialize notifications on mount
   useEffect(() => {
     const init = async () => {
       const granted = await requestNotificationPermission();
@@ -66,32 +79,33 @@ export default function App() {
     }
   }, [products]);
 
-  const handleDelete = async (id) => {
-    await deleteDoc(doc(db, "products", id));
+  const handleDelete = (id) => {
+    setProducts(prev => prev.filter(p => p.id !== id));
   };
 
-  const handleSave = async () => {
+  const handleSave = () => {
     if (!newItem.name || !newItem.date) {
       alert("Please fill in all fields");
       return;
     }
 
-    try {
-      console.log("Saving product:", newItem);
-      await addDoc(collection(db, "products"), {
-        name: newItem.name,
-        expiryDate: newItem.date,
-        category: newItem.category,
-        createdAt: new Date().toISOString()
-      });
-      console.log("Product saved successfully!");
-      setNewItem({ name: '', date: '', category: 'Groceries' });
-      setScanConfidence(null);
-      setView('dashboard');
-    } catch (error) {
-      console.error("Firebase save error:", error);
-      alert(`Failed to save: ${error.message}`);
-    }
+    const newProduct = {
+      id: Date.now().toString(),
+      name: newItem.name,
+      expiryDate: newItem.date,
+      category: newItem.category,
+      createdAt: new Date().toISOString()
+    };
+
+    // Add and sort by expiry date
+    setProducts(prev => {
+      const updated = [...prev, newProduct];
+      return updated.sort((a, b) => new Date(a.expiryDate) - new Date(b.expiryDate));
+    });
+
+    setNewItem({ name: '', date: '', category: 'Groceries' });
+    setScanConfidence(null);
+    setView('dashboard');
   };
 
   const handleScanComplete = (date, confidence) => {
@@ -104,38 +118,6 @@ export default function App() {
     setView('dashboard');
     setScanConfidence(null);
   };
-
-  // Loading state
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-[#020617] flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-slate-400">Loading ExpireGuard...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Error state
-  if (error) {
-    return (
-      <div className="min-h-screen bg-[#020617] flex items-center justify-center p-4">
-        <div className="text-center max-w-md">
-          <div className="bg-red-500/20 border border-red-500/50 rounded-2xl p-6">
-            <h2 className="text-red-400 font-bold text-xl mb-2">Connection Error</h2>
-            <p className="text-slate-400 mb-4">{error}</p>
-            <button
-              onClick={() => window.location.reload()}
-              className="bg-emerald-600 text-white px-6 py-2 rounded-lg font-bold"
-            >
-              Retry
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-[#020617] text-slate-200 font-sans">
