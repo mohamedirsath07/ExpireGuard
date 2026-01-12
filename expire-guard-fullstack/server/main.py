@@ -22,6 +22,18 @@ app.add_middleware(
 )
 
 # ==========================================
+# ROOT ENDPOINTS
+# ==========================================
+
+@app.get("/")
+def root():
+    return {"message": "ExpireGuard backend running"}
+
+@app.get("/api")
+def api_test():
+    return {"status": "API working"}
+
+# ==========================================
 # CONFIGURATION
 # ==========================================
 
