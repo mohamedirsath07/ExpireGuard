@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Download, X, Smartphone } from 'lucide-react';
+import { Download, X, Smartphone, Share } from 'lucide-react';
 
 const InstallPrompt = () => {
     const [deferredPrompt, setDeferredPrompt] = useState(null);
     const [showPrompt, setShowPrompt] = useState(false);
     const [isIOS, setIsIOS] = useState(false);
+    const [isInstalled, setIsInstalled] = useState(false);
 
     useEffect(() => {
         // Check if already installed
         if (window.matchMedia('(display-mode: standalone)').matches) {
+            setIsInstalled(true);
             return;
         }
 
@@ -51,6 +53,7 @@ const InstallPrompt = () => {
 
         if (outcome === 'accepted') {
             console.log('PWA installed');
+            setIsInstalled(true);
         }
 
         setDeferredPrompt(null);
@@ -62,6 +65,8 @@ const InstallPrompt = () => {
         localStorage.setItem('pwa-install-dismissed', new Date().toISOString());
     };
 
+    // Don't show if already installed
+    if (isInstalled) return null;
     if (!showPrompt) return null;
 
     return (
@@ -99,10 +104,9 @@ const InstallPrompt = () => {
                         )}
 
                         {isIOS && (
-                            <div className="mt-3 text-xs text-slate-500">
-                                <span className="inline-flex items-center gap-1">
-                                    Tap <span className="bg-slate-700 px-1.5 py-0.5 rounded">⬆️ Share</span> then <span className="bg-slate-700 px-1.5 py-0.5 rounded">➕ Add to Home Screen</span>
-                                </span>
+                            <div className="mt-3 flex items-center gap-2 text-slate-400 text-sm">
+                                <Share size={16} />
+                                <span>Tap Share → Add to Home Screen</span>
                             </div>
                         )}
                     </div>
@@ -117,6 +121,50 @@ const InstallPrompt = () => {
       `}</style>
         </div>
     );
+};
+
+// Export a hook for the install button in navbar
+export const useInstallApp = () => {
+    const [deferredPrompt, setDeferredPrompt] = useState(null);
+    const [canInstall, setCanInstall] = useState(false);
+    const [isInstalled, setIsInstalled] = useState(false);
+
+    useEffect(() => {
+        // Check if already installed
+        if (window.matchMedia('(display-mode: standalone)').matches) {
+            setIsInstalled(true);
+            return;
+        }
+
+        const handler = (e) => {
+            e.preventDefault();
+            setDeferredPrompt(e);
+            setCanInstall(true);
+        };
+
+        window.addEventListener('beforeinstallprompt', handler);
+
+        window.addEventListener('appinstalled', () => {
+            setIsInstalled(true);
+            setCanInstall(false);
+        });
+
+        return () => window.removeEventListener('beforeinstallprompt', handler);
+    }, []);
+
+    const install = async () => {
+        if (!deferredPrompt) return false;
+
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+
+        setDeferredPrompt(null);
+        setCanInstall(false);
+
+        return outcome === 'accepted';
+    };
+
+    return { canInstall, isInstalled, install };
 };
 
 export default InstallPrompt;

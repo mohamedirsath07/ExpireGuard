@@ -3,8 +3,8 @@ import Dashboard from './components/Dashboard';
 import Scanner from './components/Scanner';
 import AddItemModal from './components/AddItemModal';
 import NotificationPanel from './components/NotificationPanel';
-import InstallPrompt from './components/InstallPrompt';
-import { Scan, Plus, Bell } from 'lucide-react';
+import InstallPrompt, { useInstallApp } from './components/InstallPrompt';
+import { Scan, Plus, Bell, Download } from 'lucide-react';
 import { requestNotificationPermission, checkExpiringProducts, notifyExpiringProducts } from './notifications';
 
 // Local Storage key
@@ -36,6 +36,7 @@ export default function App() {
   const [scanConfidence, setScanConfidence] = useState(null);
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState([]);
+  const { canInstall, isInstalled, install } = useInstallApp();
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -126,17 +127,28 @@ export default function App() {
           <div className="bg-emerald-600 p-1.5 rounded text-white"><Scan size={20} /></div>
           <h1 className="font-bold text-lg text-white">Expire<span className="text-emerald-500">Guard</span></h1>
         </div>
-        <button
-          onClick={() => setShowNotifications(!showNotifications)}
-          className="relative p-2 hover:bg-slate-800 rounded-lg transition-colors"
-        >
-          <Bell size={20} className="text-white" />
-          {notifications.length > 0 && (
-            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center font-bold">
-              {notifications.length}
-            </span>
+        <div className="flex items-center gap-2">
+          {canInstall && !isInstalled && (
+            <button
+              onClick={install}
+              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-1.5 px-3 rounded-lg transition-colors"
+            >
+              <Download size={16} />
+              <span className="hidden sm:inline">Install</span>
+            </button>
           )}
-        </button>
+          <button
+            onClick={() => setShowNotifications(!showNotifications)}
+            className="relative p-2 hover:bg-slate-800 rounded-lg transition-colors"
+          >
+            <Bell size={20} className="text-white" />
+            {notifications.length > 0 && (
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center font-bold">
+                {notifications.length}
+              </span>
+            )}
+          </button>
+        </div>
       </nav>
 
       {showNotifications && (
