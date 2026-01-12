@@ -16,14 +16,27 @@ export default function App() {
   const [scanConfidence, setScanConfidence] = useState(null);
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   // Load from Firebase
   useEffect(() => {
-    const q = query(collection(db, "products"), orderBy("expiryDate"));
-    const unsub = onSnapshot(q, (snapshot) => {
-      setProducts(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })));
-    });
-    return () => unsub();
+    try {
+      const q = query(collection(db, "products"), orderBy("expiryDate"));
+      const unsub = onSnapshot(q, (snapshot) => {
+        setProducts(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })));
+        setLoading(false);
+      }, (err) => {
+        console.error("Firebase error:", err);
+        setError("Failed to connect to database");
+        setLoading(false);
+      });
+      return () => unsub();
+    } catch (err) {
+      console.error("Firebase init error:", err);
+      setError("Failed to initialize database");
+      setLoading(false);
+    }
   }, []);
 
   // Initialize notifications on mount (request permission + register service worker)
@@ -91,6 +104,38 @@ export default function App() {
     setView('dashboard');
     setScanConfidence(null);
   };
+
+  // Loading state
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#020617] flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-slate-400">Loading ExpireGuard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div className="min-h-screen bg-[#020617] flex items-center justify-center p-4">
+        <div className="text-center max-w-md">
+          <div className="bg-red-500/20 border border-red-500/50 rounded-2xl p-6">
+            <h2 className="text-red-400 font-bold text-xl mb-2">Connection Error</h2>
+            <p className="text-slate-400 mb-4">{error}</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="bg-emerald-600 text-white px-6 py-2 rounded-lg font-bold"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#020617] text-slate-200 font-sans">
