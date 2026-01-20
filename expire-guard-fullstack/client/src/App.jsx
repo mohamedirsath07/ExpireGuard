@@ -4,6 +4,7 @@ import Scanner from './components/Scanner';
 import AddItemModal from './components/AddItemModal';
 import NotificationPanel from './components/NotificationPanel';
 import InstallPrompt, { useInstallApp } from './components/InstallPrompt';
+import UpdatePrompt from './components/UpdatePrompt';
 import { Scan, Plus, Bell, Download } from 'lucide-react';
 import { requestNotificationPermission, checkExpiringProducts, notifyExpiringProducts } from './notifications';
 
@@ -190,6 +191,9 @@ export default function App() {
 
       {/* PWA Install Prompt */}
       <InstallPrompt />
+
+      {/* PWA Update Prompt */}
+      <UpdatePrompt />
     </div>
   );
 }

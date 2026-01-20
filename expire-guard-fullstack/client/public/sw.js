@@ -1,4 +1,6 @@
-const CACHE_NAME = 'expireguard-v1';
+// Increment this version number when deploying updates
+const CACHE_VERSION = 2;
+const CACHE_NAME = `expireguard-v${CACHE_VERSION}`;
 const urlsToCache = [
     '/',
     '/index.html',
@@ -8,24 +10,42 @@ const urlsToCache = [
 
 // Install event
 self.addEventListener('install', (event) => {
+    console.log(`[SW] Installing version ${CACHE_VERSION}`);
     event.waitUntil(
         caches.open(CACHE_NAME)
             .then((cache) => cache.addAll(urlsToCache))
     );
-    self.skipWaiting();
+    // Don't skip waiting automatically - let user decide when to update
+});
+
+// Listen for skip waiting message from the app
+self.addEventListener('message', (event) => {
+    if (event.data && event.data.type === 'SKIP_WAITING') {
+        console.log('[SW] Skip waiting triggered by user');
+        self.skipWaiting();
+    }
 });
 
 // Activate event
 self.addEventListener('activate', (event) => {
+    console.log(`[SW] Activating version ${CACHE_VERSION}`);
     event.waitUntil(
         caches.keys().then((cacheNames) => {
             return Promise.all(
                 cacheNames.map((cacheName) => {
                     if (cacheName !== CACHE_NAME) {
+                        console.log(`[SW] Deleting old cache: ${cacheName}`);
                         return caches.delete(cacheName);
                     }
                 })
             );
+        }).then(() => {
+            // Notify all clients that a new version is active
+            return self.clients.matchAll().then(clients => {
+                clients.forEach(client => {
+                    client.postMessage({ type: 'SW_UPDATED', version: CACHE_VERSION });
+                });
+            });
         })
     );
     self.clients.claim();
