@@ -6,3 +6,8 @@ pytesseract
 numpy
 opencv-python-headless
 python-dateutil
+motor
+python-dotenv
+python-jose[cryptography]
+passlib[bcrypt]
+bcrypt

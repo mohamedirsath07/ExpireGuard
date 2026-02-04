@@ -1,25 +1,267 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel
 from PIL import Image
 import pytesseract
 import io
 import re
 import cv2
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 from dateutil import parser
 from typing import Optional, Tuple, List, Dict
 from dataclasses import dataclass
+import os
+from dotenv import load_dotenv
+from motor.motor_asyncio import AsyncIOMotorClient
+from bson import ObjectId
+from passlib.context import CryptContext
+from jose import JWTError, jwt
+
+# Load environment variables
+load_dotenv()
 
 app = FastAPI(title="ExpireGuard OCR API", version="2.0")
 
-# Allow React to talk to Python
+# CORS - Allow frontend origins
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174",
+]
+
+# Add Vercel domains from environment variable
+FRONTEND_URL = os.getenv("FRONTEND_URL", "")
+if FRONTEND_URL:
+    ALLOWED_ORIGINS.append(FRONTEND_URL)
+
+# Also allow any Vercel preview deployments
+ALLOWED_ORIGINS.append("https://*.vercel.app")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origins=["*"],  # In production, you can restrict this
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
+
+# ==========================================
+# AUTH CONFIGURATION
+# ==========================================
+
+SECRET_KEY = os.getenv("SECRET_KEY", "expireguard-secret-key-change-in-production")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_DAYS = 30
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+security = HTTPBearer()
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict) -> str:
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        user = await db.users.find_one({"_id": ObjectId(user_id)})
+        if user is None:
+            raise HTTPException(status_code=401, detail="User not found")
+        return user
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+# ==========================================
+# MONGODB CONNECTION
+# ==========================================
+
+MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+client: AsyncIOMotorClient = None
+db = None
+
+@app.on_event("startup")
+async def startup_db_client():
+    global client, db
+    client = AsyncIOMotorClient(MONGODB_URI)
+    db = client.expireguard
+    print(f"Connected to MongoDB")
+
+@app.on_event("shutdown")
+async def shutdown_db_client():
+    global client
+    if client:
+        client.close()
+
+# ==========================================
+# AUTH MODELS
+# ==========================================
+
+class UserRegister(BaseModel):
+    username: str
+    password: str
+    name: Optional[str] = None
+
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
+class UserResponse(BaseModel):
+    id: str
+    username: str
+    name: Optional[str] = None
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str
+    user: UserResponse
+
+# ==========================================
+# AUTH ENDPOINTS
+# ==========================================
+
+@app.post("/auth/register", response_model=TokenResponse)
+async def register(user_data: UserRegister):
+    """Register a new user"""
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not initialized")
+    
+    # Check if username exists
+    existing = await db.users.find_one({"username": user_data.username.lower()})
+    if existing:
+        raise HTTPException(status_code=400, detail="Username already taken")
+    
+    # Create user
+    user_doc = {
+        "username": user_data.username.lower(),
+        "password": hash_password(user_data.password),
+        "name": user_data.name or user_data.username,
+        "createdAt": datetime.utcnow().isoformat()
+    }
+    result = await db.users.insert_one(user_doc)
+    
+    # Create token
+    token = create_access_token({"sub": str(result.inserted_id)})
+    
+    return TokenResponse(
+        access_token=token,
+        token_type="bearer",
+        user=UserResponse(
+            id=str(result.inserted_id), 
+            username=user_data.username.lower(),
+            name=user_doc["name"]
+        )
+    )
+
+@app.post("/auth/login", response_model=TokenResponse)
+async def login(user_data: UserLogin):
+    """Login with username and password"""
+    user = await db.users.find_one({"username": user_data.username.lower()})
+    if not user or not verify_password(user_data.password, user["password"]):
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    
+    token = create_access_token({"sub": str(user["_id"])})
+    
+    return TokenResponse(
+        access_token=token,
+        token_type="bearer",
+        user=UserResponse(
+            id=str(user["_id"]), 
+            username=user["username"],
+            name=user.get("name")
+        )
+    )
+
+@app.get("/auth/me", response_model=UserResponse)
+async def get_me(current_user: dict = Depends(get_current_user)):
+    """Get current user info"""
+    return UserResponse(
+        id=str(current_user["_id"]), 
+        username=current_user["username"],
+        name=current_user.get("name")
+    )
+
+# ==========================================
+# PRODUCT MODEL
+# ==========================================
+
+class ProductCreate(BaseModel):
+    name: str
+    expiryDate: str
+    category: str
+
+class ProductResponse(BaseModel):
+    id: str
+    name: str
+    expiryDate: str
+    category: str
+    createdAt: str
+
+# ==========================================
+# PRODUCT CRUD ENDPOINTS (Protected)
+# ==========================================
+
+@app.get("/products", response_model=List[ProductResponse])
+async def get_products(current_user: dict = Depends(get_current_user)):
+    """Get all products for current user sorted by expiry date"""
+    products = []
+    cursor = db.products.find({"user_id": str(current_user["_id"])}).sort("expiryDate", 1)
+    async for doc in cursor:
+        products.append(ProductResponse(
+            id=str(doc["_id"]),
+            name=doc["name"],
+            expiryDate=doc["expiryDate"],
+            category=doc["category"],
+            createdAt=doc.get("createdAt", "")
+        ))
+    return products
+
+@app.post("/products", response_model=ProductResponse)
+async def create_product(product: ProductCreate, current_user: dict = Depends(get_current_user)):
+    """Create a new product for current user"""
+    doc = {
+        "name": product.name,
+        "expiryDate": product.expiryDate,
+        "category": product.category,
+        "user_id": str(current_user["_id"]),
+        "createdAt": datetime.utcnow().isoformat()
+    }
+    result = await db.products.insert_one(doc)
+    return ProductResponse(
+        id=str(result.inserted_id),
+        name=doc["name"],
+        expiryDate=doc["expiryDate"],
+        category=doc["category"],
+        createdAt=doc["createdAt"]
+    )
+
+@app.delete("/products/{product_id}")
+async def delete_product(product_id: str, current_user: dict = Depends(get_current_user)):
+    """Delete a product by ID (only if owned by current user)"""
+    try:
+        result = await db.products.delete_one({
+            "_id": ObjectId(product_id),
+            "user_id": str(current_user["_id"])
+        })
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Product not found")
+        return {"message": "Product deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 # ==========================================
 # ROOT ENDPOINTS

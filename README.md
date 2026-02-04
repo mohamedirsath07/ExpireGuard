@@ -2,6 +2,10 @@
 
 A modern product expiry tracking application with AI-powered OCR date detection.
 
+> Housekeeping: Deployment configs removed for a clean setup.
+> The files `vercel.json` and `render.yaml` have been deleted.
+> Set up your preferred deployment from scratch.
+
 ## 🏗️ Architecture
 
 - **Frontend**: React + Vite + TailwindCSS + GSAP
