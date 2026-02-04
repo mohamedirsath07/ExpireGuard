@@ -5,33 +5,76 @@ import AddItemModal from './components/AddItemModal';
 import NotificationPanel from './components/NotificationPanel';
 import InstallPrompt, { useInstallApp } from './components/InstallPrompt';
 import UpdatePrompt from './components/UpdatePrompt';
-import { Scan, Plus, Bell, Download } from 'lucide-react';
+import AuthScreen from './components/AuthScreen';
+import { Scan, Plus, Bell, Download, LogOut } from 'lucide-react';
 import { requestNotificationPermission, checkExpiringProducts, notifyExpiringProducts } from './notifications';
 
-// Local Storage key
-const STORAGE_KEY = 'expireguard_products';
+// API URL from environment
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-// Helper functions for localStorage
-const loadProducts = () => {
+// Get auth token
+const getToken = () => localStorage.getItem('token');
+
+// API helper functions for MongoDB (with auth)
+const fetchProducts = async () => {
   try {
-    const data = localStorage.getItem(STORAGE_KEY);
-    return data ? JSON.parse(data) : [];
+    const token = getToken();
+    if (!token) return [];
+    const res = await fetch(`${API_URL}/products`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (res.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.reload();
+      return [];
+    }
+    if (!res.ok) throw new Error('Failed to fetch');
+    return await res.json();
   } catch (err) {
     console.error('Failed to load products:', err);
     return [];
   }
 };
 
-const saveProducts = (products) => {
+const createProduct = async (product) => {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(products));
+    const token = getToken();
+    const res = await fetch(`${API_URL}/products`, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify(product)
+    });
+    if (!res.ok) throw new Error('Failed to create');
+    return await res.json();
   } catch (err) {
-    console.error('Failed to save products:', err);
+    console.error('Failed to create product:', err);
+    return null;
+  }
+};
+
+const deleteProduct = async (id) => {
+  try {
+    const token = getToken();
+    const res = await fetch(`${API_URL}/products/${id}`, { 
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('Failed to delete product:', err);
+    return false;
   }
 };
 
 export default function App() {
+  const [user, setUser] = useState(null);
+  const [token, setToken] = useState(null);
   const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [view, setView] = useState('dashboard');
   const [newItem, setNewItem] = useState({ name: '', date: '', category: 'Groceries' });
   const [scanConfidence, setScanConfidence] = useState(null);
@@ -39,20 +82,27 @@ export default function App() {
   const [notifications, setNotifications] = useState([]);
   const { canInstall, isInstalled, install } = useInstallApp();
 
-  // Load from localStorage on mount
+  // Check for existing auth on mount
   useEffect(() => {
-    const savedProducts = loadProducts();
-    // Sort by expiry date
-    savedProducts.sort((a, b) => new Date(a.expiryDate) - new Date(b.expiryDate));
-    setProducts(savedProducts);
+    const savedToken = localStorage.getItem('token');
+    const savedUser = localStorage.getItem('user');
+    if (savedToken && savedUser) {
+      setToken(savedToken);
+      setUser(JSON.parse(savedUser));
+    }
+    setLoading(false);
   }, []);
 
-  // Save to localStorage whenever products change
+  // Load products when user logs in
   useEffect(() => {
-    if (products.length > 0 || localStorage.getItem(STORAGE_KEY)) {
-      saveProducts(products);
+    if (user && token) {
+      const load = async () => {
+        const data = await fetchProducts();
+        setProducts(data);
+      };
+      load();
     }
-  }, [products]);
+  }, [user, token]);
 
   // Initialize notifications on mount
   useEffect(() => {
@@ -81,29 +131,46 @@ export default function App() {
     }
   }, [products]);
 
-  const handleDelete = (id) => {
-    setProducts(prev => prev.filter(p => p.id !== id));
+  const handleLogin = (userData, accessToken) => {
+    setUser(userData);
+    setToken(accessToken);
   };
 
-  const handleSave = () => {
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setUser(null);
+    setToken(null);
+    setProducts([]);
+  };
+
+  const handleDelete = async (id) => {
+    const success = await deleteProduct(id);
+    if (success) {
+      setProducts(prev => prev.filter(p => p.id !== id));
+    }
+  };
+
+  const handleSave = async () => {
     if (!newItem.name || !newItem.date) {
       alert("Please fill in all fields");
       return;
     }
 
-    const newProduct = {
-      id: Date.now().toString(),
+    const productData = {
       name: newItem.name,
       expiryDate: newItem.date,
-      category: newItem.category,
-      createdAt: new Date().toISOString()
+      category: newItem.category
     };
 
-    // Add and sort by expiry date
-    setProducts(prev => {
-      const updated = [...prev, newProduct];
-      return updated.sort((a, b) => new Date(a.expiryDate) - new Date(b.expiryDate));
-    });
+    const saved = await createProduct(productData);
+    if (saved) {
+      // Add and sort by expiry date
+      setProducts(prev => {
+        const updated = [...prev, saved];
+        return updated.sort((a, b) => new Date(a.expiryDate) - new Date(b.expiryDate));
+      });
+    }
 
     setNewItem({ name: '', date: '', category: 'Groceries' });
     setScanConfidence(null);
@@ -120,6 +187,20 @@ export default function App() {
     setView('dashboard');
     setScanConfidence(null);
   };
+
+  // Show loading
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#020617] flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  // Show auth screen if not logged in
+  if (!user) {
+    return <AuthScreen onLogin={handleLogin} />;
+  }
 
   return (
     <div className="min-h-screen bg-[#020617] text-slate-200 font-sans">
@@ -148,6 +229,13 @@ export default function App() {
                 {notifications.length}
               </span>
             )}
+          </button>
+          <button
+            onClick={handleLogout}
+            className="p-2 hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-red-400"
+            title={`Logout (${user.username})`}
+          >
+            <LogOut size={20} />
           </button>
         </div>
       </nav>
