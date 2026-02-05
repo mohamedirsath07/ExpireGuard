@@ -1,5 +1,5 @@
 // Increment this version number when deploying updates
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 3;
 const CACHE_NAME = `expireguard-v${CACHE_VERSION}`;
 const urlsToCache = [
     '/',
@@ -51,12 +51,42 @@ self.addEventListener('activate', (event) => {
     self.clients.claim();
 });
 
-// Fetch event - network first, then cache
+// Fetch event - network first, then cache (skip API requests)
 self.addEventListener('fetch', (event) => {
-    event.respondWith(
-        fetch(event.request)
-            .catch(() => caches.match(event.request))
-    );
+    const url = new URL(event.request.url);
+    
+    // Don't cache or intercept API requests - let them go directly to the network
+    // This prevents CORS issues and allows proper error handling in the app
+    if (url.hostname.includes('onrender.com') || 
+        url.hostname.includes('render.com') ||
+        url.pathname.startsWith('/auth/') ||
+        url.pathname.startsWith('/api/') ||
+        url.pathname.startsWith('/ocr/') ||
+        url.pathname.startsWith('/items/') ||
+        url.pathname.startsWith('/user/')) {
+        return; // Don't intercept - let browser handle it normally
+    }
+    
+    // Only handle same-origin requests and static assets
+    if (url.origin === self.location.origin) {
+        event.respondWith(
+            fetch(event.request)
+                .then(response => {
+                    // Return the response
+                    return response;
+                })
+                .catch(() => {
+                    // If network fails, try cache
+                    return caches.match(event.request).then(cachedResponse => {
+                        // Return cached response or a fallback
+                        return cachedResponse || new Response('Offline', { 
+                            status: 503, 
+                            statusText: 'Service Unavailable' 
+                        });
+                    });
+                })
+        );
+    }
 });
 
 // Handle notification click

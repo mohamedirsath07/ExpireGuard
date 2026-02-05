@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Scan, User, Lock, LogIn, UserPlus, Mail } from 'lucide-react';
+import { Scan, User, Lock, LogIn, UserPlus, Mail, AlertCircle, RefreshCw } from 'lucide-react';
 
 export default function AuthScreen({ onLogin }) {
   const [isLogin, setIsLogin] = useState(true);
@@ -9,13 +9,55 @@ export default function AuthScreen({ onLogin }) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('');
 
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+  // Retry fetch with exponential backoff for cold starts
+  const fetchWithRetry = async (url, options, maxRetries = 3) => {
+    let lastError;
+    
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        // Show appropriate loading message
+        if (attempt === 0) {
+          setLoadingMessage('Connecting...');
+        } else if (attempt === 1) {
+          setLoadingMessage('Server is waking up...');
+        } else {
+          setLoadingMessage('Almost there...');
+        }
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+        
+        const response = await fetch(url, {
+          ...options,
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        return response;
+      } catch (err) {
+        lastError = err;
+        console.log(`Attempt ${attempt + 1} failed:`, err.message);
+        
+        // If it's an abort or network error, wait and retry
+        if (attempt < maxRetries - 1) {
+          const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+    
+    throw lastError;
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setLoading(true);
+    setLoadingMessage('');
 
     if (!username || !password) {
       setError('Please fill in all fields');
@@ -47,7 +89,7 @@ export default function AuthScreen({ onLogin }) {
         ? { username, password }
         : { username, password, name };
       
-      const res = await fetch(`${API_URL}${endpoint}`, {
+      const res = await fetchWithRetry(`${API_URL}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
@@ -65,9 +107,15 @@ export default function AuthScreen({ onLogin }) {
       
       onLogin(data.user, data.access_token);
     } catch (err) {
-      setError(err.message);
+      // Provide user-friendly error messages
+      if (err.name === 'AbortError' || err.message === 'Failed to fetch' || err.message.includes('network')) {
+        setError('Unable to connect to server. The server might be starting up - please try again in a moment.');
+      } else {
+        setError(err.message);
+      }
     } finally {
       setLoading(false);
+      setLoadingMessage('');
     }
   };
 
@@ -151,8 +199,16 @@ export default function AuthScreen({ onLogin }) {
 
           {/* Error Message */}
           {error && (
-            <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm p-3 rounded-lg">
-              {error}
+            <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm p-3 rounded-lg flex items-start gap-2">
+              <AlertCircle size={18} className="shrink-0 mt-0.5" />
+              <div>
+                <p>{error}</p>
+                {error.includes('server') && (
+                  <p className="text-xs text-slate-500 mt-1">
+                    💡 Free servers sleep after inactivity. First request may take 30-60 seconds.
+                  </p>
+                )}
+              </div>
             </div>
           )}
 
@@ -163,7 +219,10 @@ export default function AuthScreen({ onLogin }) {
             className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-600/50 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-colors"
           >
             {loading ? (
-              <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              <div className="flex items-center gap-2">
+                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <span className="text-sm font-normal">{loadingMessage || 'Please wait...'}</span>
+              </div>
             ) : (
               <>
                 {isLogin ? <LogIn size={20} /> : <UserPlus size={20} />}
