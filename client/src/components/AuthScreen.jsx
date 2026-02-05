@@ -13,44 +13,24 @@ export default function AuthScreen({ onLogin }) {
 
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-  // Retry fetch with exponential backoff for cold starts
-  const fetchWithRetry = async (url, options, maxRetries = 3) => {
-    let lastError;
+  // Fetch with timeout (no retry for mutations to avoid duplicates)
+  const fetchWithTimeout = async (url, options, timeoutMs = 45000) => {
+    setLoadingMessage('Connecting to server...');
     
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        // Show appropriate loading message
-        if (attempt === 0) {
-          setLoadingMessage('Connecting...');
-        } else if (attempt === 1) {
-          setLoadingMessage('Server is waking up...');
-        } else {
-          setLoadingMessage('Almost there...');
-        }
-        
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
-        
-        const response = await fetch(url, {
-          ...options,
-          signal: controller.signal
-        });
-        
-        clearTimeout(timeoutId);
-        return response;
-      } catch (err) {
-        lastError = err;
-        console.log(`Attempt ${attempt + 1} failed:`, err.message);
-        
-        // If it's an abort or network error, wait and retry
-        if (attempt < maxRetries - 1) {
-          const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
-          await new Promise(resolve => setTimeout(resolve, delay));
-        }
-      }
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      return response;
+    } catch (err) {
+      clearTimeout(timeoutId);
+      throw err;
     }
-    
-    throw lastError;
   };
 
   const handleSubmit = async (e) => {
@@ -89,13 +69,25 @@ export default function AuthScreen({ onLogin }) {
         ? { username, password }
         : { username, password, name };
       
-      const res = await fetchWithRetry(`${API_URL}${endpoint}`, {
+      let res = await fetchWithTimeout(`${API_URL}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
 
-      const data = await res.json();
+      let data = await res.json();
+
+      // If registration fails with "Username already taken", try logging in
+      // This handles the edge case where registration succeeded but response failed
+      if (!isLogin && !res.ok && data.detail === 'Username already taken') {
+        setLoadingMessage('Account exists, logging in...');
+        res = await fetchWithTimeout(`${API_URL}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        data = await res.json();
+      }
 
       if (!res.ok) {
         throw new Error(data.detail || 'Authentication failed');

@@ -1,5 +1,5 @@
 // Increment this version number when deploying updates
-const CACHE_VERSION = 3;
+const CACHE_VERSION = 4;
 const CACHE_NAME = `expireguard-v${CACHE_VERSION}`;
 const urlsToCache = [
     '/',
@@ -15,7 +15,8 @@ self.addEventListener('install', (event) => {
         caches.open(CACHE_NAME)
             .then((cache) => cache.addAll(urlsToCache))
     );
-    // Don't skip waiting automatically - let user decide when to update
+    // Skip waiting to activate immediately
+    self.skipWaiting();
 });
 
 // Listen for skip waiting message from the app

@@ -17,12 +17,43 @@
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
     <script>
-      // Register service worker
+      // Register service worker with forced update
       if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js')
-            .then(reg => console.log('SW registered'))
-            .catch(err => console.log('SW registration failed:', err));
+        window.addEventListener('load', async () => {
+          try {
+            const reg = await navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' });
+            console.log('SW registered');
+            
+            // Force update check
+            reg.update();
+            
+            // If there's a waiting worker, activate it immediately
+            if (reg.waiting) {
+              reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+            }
+            
+            // Listen for new workers
+            reg.addEventListener('updatefound', () => {
+              const newWorker = reg.installing;
+              newWorker.addEventListener('statechange', () => {
+                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                  // New version available, activate it
+                  newWorker.postMessage({ type: 'SKIP_WAITING' });
+                }
+              });
+            });
+            
+            // Reload when controller changes
+            let refreshing = false;
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+              if (!refreshing) {
+                refreshing = true;
+                window.location.reload();
+              }
+            });
+          } catch (err) {
+            console.log('SW registration failed:', err);
+          }
         });
       }
     </script>
